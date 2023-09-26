@@ -16,12 +16,14 @@
 
 use std::cmp;
 use std::convert::TryFrom;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use crate::eraftpb::{
     ConfChange, ConfChangeV2, ConfState, Entry, EntryType, HardState, Message, MessageType,
     Snapshot,
 };
+use backtrace::{Backtrace, BacktraceFmt, BytesOrWideString, PrintFmt};
 use protobuf::Message as _;
 use raft_proto::ConfChangeI;
 use rand::{self, Rng};
@@ -1024,6 +1026,15 @@ impl<T: Storage> Raft<T> {
             e.index = li + 1 + i as u64;
         }
         self.raft_log.append(es);
+
+        let caller = BacktraceWrap(Backtrace::new());
+        info!(
+            self.logger,
+            "append raft entries";
+            "first_index" => li,
+            "last_index" => self.raft_log.last_index(),
+            "caller" => ?caller,
+        );
 
         // Not update self's pr.matched until on_persist_entries
         true
@@ -2910,5 +2921,39 @@ impl<T: Storage> Raft<T> {
         if let Some(pr) = self.mut_prs().get_mut(target) {
             pr.ins.set_cap(cap);
         }
+    }
+}
+
+pub struct BacktraceWrap(pub Backtrace);
+
+impl fmt::Debug for BacktraceWrap {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let full = fmt.alternate();
+        let (frames, style) = (&self.0.frames()[1..6], PrintFmt::Short);
+
+        // When printing paths we try to strip the cwd if it exists, otherwise
+        // we just print the path as-is. Note that we also only do this for the
+        // short format, because if it's full we presumably want to print
+        // everything.
+        let cwd = std::env::current_dir();
+        let mut print_path = move |fmt: &mut fmt::Formatter<'_>, path: BytesOrWideString<'_>| {
+            let path = path.into_path_buf();
+            if !full {
+                if let Ok(cwd) = &cwd {
+                    if let Ok(suffix) = path.strip_prefix(cwd) {
+                        return fmt::Display::fmt(&suffix.display(), fmt);
+                    }
+                }
+            }
+            fmt::Display::fmt(&path.display(), fmt)
+        };
+
+        let mut f = BacktraceFmt::new(fmt, style, &mut print_path);
+        f.add_context()?;
+        for frame in frames {
+            f.frame().backtrace_frame(frame)?;
+        }
+        f.finish()?;
+        Ok(())
     }
 }
