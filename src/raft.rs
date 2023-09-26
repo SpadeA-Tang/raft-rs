@@ -2929,7 +2929,7 @@ pub struct BacktraceWrap(pub Backtrace);
 impl fmt::Debug for BacktraceWrap {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let full = fmt.alternate();
-        let (frames, style) = (&self.0.frames()[1..6], PrintFmt::Short);
+        let (frames, style) = (&self.0.frames()[1..7], PrintFmt::Short);
 
         // When printing paths we try to strip the cwd if it exists, otherwise
         // we just print the path as-is. Note that we also only do this for the
